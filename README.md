@@ -1,58 +1,40 @@
-**⚠️ This is currently under development, dont use it yet if you're not comfortable with constantly merging new changes**
+# Senpai Stream Cloudstream Extension
 
-# `Cloudstream3 Plugin Repo Template`
+Extension pour Cloudstream permettant de visionner le contenu de [Senpai Stream](https://senpai-stream.hair/).
 
-Template for a [Cloudstream3](https://github.com/recloudstream) plugin repo
+## Installation
 
-**⚠️ Make sure you check "Include all branches" when using this template**
+### Via GitHub (Recommandé)
 
- 
-## Getting started with writing your first plugin
+1.  Créez un nouveau **repository public** sur votre compte GitHub (ex: `SenpaiStream-Extension`).
+2.  Poussez le contenu de ce dossier sur ce repository :
+    ```bash
+    git remote add origin https://github.com/VOTRE_NOM/SenpaiStream-Extension.git
+    git branch -M main
+    git push -u origin main
+    ```
+3.  Attendez que l'action **Build** se termine dans l'onglet "Actions" de votre repository GitHub.
+4.  Une fois terminé, une branche `builds` sera créée (ou mise à jour) avec le fichier `.cs3`.
+5.  Dans l'application **Cloudstream** :
+    *   Allez dans **Paramètres** > **Extensions**.
+    *   Cliquez sur **Ajouter un dépôt**.
+    *   Entrez l'URL courte de votre repository (ex: `https://github.com/VOTRE_NOM/SenpaiStream-Extension`).
+    *   L'extension "Senpai Stream" devrait apparaître. Installez-la.
 
-This template includes 1 example plugin.
+### Installation Manuelle (Développeur)
 
-1. Open the root build.gradle.kts, read the comments and replace all the placeholders
-2. Familiarize yourself with the project structure. Most files are commented
-3. Build or deploy your first plugin using:
-   - Windows: `.\gradlew.bat ExampleProvider:make` or `.\gradlew.bat ExampleProvider:deployWithAdb`
-   - Linux & Mac: `./gradlew ExampleProvider:make` or `./gradlew ExampleProvider:deployWithAdb`
+Si vous avez un environnement Android/Java configuré :
+1.  Ouvrez un terminal dans ce dossier.
+2.  Exécutez : `.\gradlew.bat make`
+3.  Le fichier `.cs3` sera généré dans le dossier `SenpaiStreamProvider/build/`.
+4.  Transférez ce fichier sur votre téléphone et ouvrez-le avec Cloudstream.
 
+## Fonctionnalités
 
-## Granting All Files Access on Newer Android Devices
+*   Navigation (Films, Séries, Animés, Tendances)
+*   Recherche
+*   Lecture de vidéos (Contournement basique de la protection Cloudflare R2 via signature Livewire)
 
-For local plugin testing, you need to grant the app "All Files Access" on newer Android devices (Android 11 and above). Here’s how to do it:
+## Disclaimer
 
-### Using ADB
-
-* `adb shell appops set --uid PACKAGE_NAME MANAGE_EXTERNAL_STORAGE allow`
-* Replace `PACKAGE_NAME` with the name of the package for the Cloudstream3 version you are using:
-   - debug: `com.lagradost.cloudstream3.prerelease.debug`
-   - prerelease: `com.lagradost.cloudstream3.prerelease`
-   - stable: `com.lagradost.cloudstream3`
-
-### Manually
-
-1. **Open Settings**: Go to your device’s Settings menu.
-
-2. **Navigate to Special Access**:
-   - Tap on "Apps & notifications" or "Apps".
-   - Select "Special app access" or "Special access".
-
-3. **Select All Files Access**:
-   - Tap on "All files access".
-   - It may be under the three vertical dots menu towards the top of the screen.
-
-4. **Grant Access to the App**: Find the app in the list and tap on it to toggle it, if it is not already enabled.
-
-6. **Restart the App**: Close and reopen the app to apply the changes.
-
-
-## License
-
-Everything in this repo is released into the public domain. You may use it however you want with no conditions whatsoever
-
-
-## Attribution
-
-This template as well as the gradle plugin and the whole plugin system is **heavily** based on [Aliucord](https://github.com/Aliucord).
-*Go use it, it's a great mobile discord client mod!*
+Cette extension est fournie à titre expérimental. Le site Senpai Stream utilise des protections (Cloudflare, Publicités) qui peuvent évoluer et bloquer l'accès à tout moment.
