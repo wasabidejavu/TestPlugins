@@ -1,6 +1,8 @@
 package com.senpaistream
 
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream3.MainPageRequest
 import com.lagradost.cloudstream3.utils.AppUtils
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
@@ -18,23 +20,23 @@ class SenpaiStreamProvider : MainAPI() {
         TvType.Anime,
     )
 
-    override val mainPage = mainPageOf(
-        "$mainUrl/movies" to "Films",
-        "$mainUrl/tv-shows" to "Séries",
-        "$mainUrl/animes" to "Animés",
-        "$mainUrl/trending" to "Tendances",
+    override val mainPage = listOf(
+        MainPageRequest("$mainUrl/movies", "Films"),
+        MainPageRequest("$mainUrl/tv-shows", "Séries"),
+        MainPageRequest("$mainUrl/animes", "Animés"),
+        MainPageRequest("$mainUrl/trending", "Tendances"),
     )
 
     override suspend fun getMainPage(
         page: Int,
         request: MainPageRequest
     ): HomePageResponse {
-        val url = if(page == 1) request.data else "${request.data}?page=$page"
+        val url = if (page == 1) request.data else "${request.data}?page=$page"
         val document = app.get(url).document
         val home = document.select("div.grid.grid-cols-2 > div").mapNotNull {
             it.toSearchResponse()
         }
-        return newHomePageResponse(request.name, home)
+        return HomePageResponse(listOf(HomePageList(request.name, home)))
     }
 
     private fun Element.toSearchResponse(): SearchResponse? {
@@ -42,14 +44,19 @@ class SenpaiStreamProvider : MainAPI() {
         val title = this.selectFirst("h3")?.text() ?: return null
         val posterUrl = this.selectFirst("img")?.attr("src")
         
-        return newMovieSearchResponse(title, link, TvType.Movie) {
-            this.posterUrl = posterUrl
-        }
+        return MovieSearchResponse(
+            title,
+            link,
+            this@SenpaiStreamProvider.name,
+            TvType.Movie,
+            posterUrl,
+            null,
+            null
+        )
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val url = "$mainUrl/browse?s=$query"
-        val document = app.get(url).document
+        val document = app.get("$mainUrl/search?q=$query").document
         return document.select("div.grid.grid-cols-2 > div").mapNotNull {
             it.toSearchResponse()
         }
@@ -61,51 +68,53 @@ class SenpaiStreamProvider : MainAPI() {
         val title = document.selectFirst("h1")?.text()?.trim() ?: return null
         val poster = document.selectFirst("img[alt='Cover']")?.attr("src")
         val description = document.selectFirst("meta[name='description']")?.attr("content")
-        val year = document.selectFirst("div.flex.items-center.text-gray-400 span:contains(20)")?.text()?.toIntOrNull()
-        
+        val yearStr = document.selectFirst("div.flex.items-center.text-gray-400 span:contains(20)")?.text()
+        val year = yearStr?.filter { it.isDigit() }?.toIntOrNull()
+
         val type = if (url.contains("/movie/")) TvType.Movie else TvType.TvSeries
 
-        // Extract Livewire snapshot for videos/episodes
-        val livewireDiv = document.selectFirst("div[wire:snapshot]")
-        val snapshot = livewireDiv?.attr("wire:snapshot")
-        // We'll parse this in loadLinks or here? 
-        // For Movies, the link might be in the snapshot.
-        // For Series, we need to see how episodes are listed.
-        
-        if (type == TvType.Movie) {
-            return newMovieLoadResponse(title, url, TvType.Movie, url) {
-                this.posterUrl = poster
-                this.plot = description
-                this.year = year
-            }
+        val episodes = document.select("ul.space-y-2 a[href*='/movie/']").mapNotNull { episodeElement ->
+            val episodeUrl = episodeElement.attr("href") ?: return@mapNotNull null
+            val episodeTitle = episodeElement.selectFirst("span")?.text()?.trim() ?: episodeElement.text().trim()
+            val episodeNum = episodeTitle.substringAfterLast(" ").filter { it.isDigit() }.toIntOrNull()
+
+            Episode(
+                data = episodeUrl,
+                name = episodeTitle,
+                episode = episodeNum
+            )
+        }
+
+        return if (episodes.isNotEmpty()) {
+            TvSeriesLoadResponse(
+                title,
+                url,
+                this.name,
+                TvType.TvSeries,
+                episodes,
+                poster,
+                year,
+                description,
+                null
+            )
         } else {
-            // For series, looking at the user's request, the URL structure is /series/ID/VF/Sxx/Exx.mp4
-            // The page likely lists episodes. 
-            // In the provided HTML (which was a movie), we saw `videos` in the snapshot.
-            // We assume series page has similar structure or list of episodes.
-            // Let's look for episode list in the HTML first.
-            val episodes = document.select("div.episode-item").mapNotNull { 
-                // Placeholder selector, need actual series page to verify
-                val epNum = it.selectFirst(".episode-number")?.text()?.toIntOrNull()
-                val epUrl = it.selectFirst("a")?.attr("href")
-                if (epUrl == null) null
-                else newEpisode(epUrl) {
-                    this.episode = epNum
-                }
-            }
-            
-             return newTvSeriesLoadResponse(title, url, type, episodes) {
-                this.posterUrl = poster
-                this.plot = description
-                this.year = year
-            }
+            MovieLoadResponse(
+                title,
+                url,
+                this.name,
+                TvType.Movie,
+                url,
+                poster,
+                year,
+                description,
+                null
+            )
         }
     }
 
     override suspend fun loadLinks(
         data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
+        isDownload: Boolean,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val document = app.get(data).document

@@ -12,7 +12,7 @@ buildscript {
     }
 
     dependencies {
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.10")
         classpath("com.android.tools.build:gradle:8.7.3")
         // Cloudstream gradle plugin which makes everything work and builds plugins
         classpath("com.github.recloudstream:gradle:-SNAPSHOT")
@@ -57,7 +57,7 @@ subprojects {
 
         tasks.withType<KotlinJvmCompile> {
             compilerOptions {
-                jvmTarget.set(JvmTarget.JVM_1_8) // Required
+                jvmTarget.set(JvmTarget.JVM_17) // Recommended for modern Android/Kotlin
                 freeCompilerArgs.addAll(
                     "-Xno-call-assertions",
                     "-Xno-param-assertions",
@@ -73,7 +73,7 @@ subprojects {
         val implementation by configurations
 
         // Stubs for all cloudstream classes
-        cloudstream("com.lagradost:cloudstream3:pre-release")
+        cloudstream("com.lagradost:cloudstream3:latest")
 
         // These dependencies can include any of those which are added by the app,
         // but you don't need to include any of them if you don't need them.
