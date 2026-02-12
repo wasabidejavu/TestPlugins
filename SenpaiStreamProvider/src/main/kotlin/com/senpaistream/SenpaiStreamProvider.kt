@@ -1,9 +1,7 @@
 package com.senpaistream
 
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.app
-import com.lagradost.cloudstream3.MainPageRequest
-import com.lagradost.cloudstream3.utils.AppUtils
+import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 import org.jsoup.nodes.Element
@@ -20,11 +18,11 @@ class SenpaiStreamProvider : MainAPI() {
         TvType.Anime,
     )
 
-    override val mainPage = listOf(
-        MainPageRequest("$mainUrl/movies", "Films"),
-        MainPageRequest("$mainUrl/tv-shows", "Séries"),
-        MainPageRequest("$mainUrl/animes", "Animés"),
-        MainPageRequest("$mainUrl/trending", "Tendances"),
+    override val mainPage = mainPageOf(
+        "$mainUrl/movies" to "Films",
+        "$mainUrl/tv-shows" to "Séries",
+        "$mainUrl/animes" to "Animés",
+        "$mainUrl/trending" to "Tendances",
     )
 
     override suspend fun getMainPage(
@@ -33,31 +31,29 @@ class SenpaiStreamProvider : MainAPI() {
     ): HomePageResponse {
         val url = if (page == 1) request.data else "${request.data}?page=$page"
         val document = app.get(url).document
-        val home = document.select("div.grid.grid-cols-2 > div").mapNotNull {
+        val home = document.select("div.grid.grid-cols-2 > div, div.flex.flex-wrap.gap-4 > a").mapNotNull {
             it.toSearchResponse()
         }
-        return HomePageResponse(listOf(HomePageList(request.name, home)))
+        return newHomePageResponse(request.name, home)
     }
 
     private fun Element.toSearchResponse(): SearchResponse? {
-        val link = this.selectFirst("a")?.attr("href") ?: return null
-        val title = this.selectFirst("h3")?.text() ?: return null
+        val link = if (this.tagName() == "a") {
+            this.attr("href")
+        } else {
+            this.selectFirst("a")?.attr("href")
+        } ?: return null
+        val title = this.selectFirst("h3")?.text()?.trim() ?: this.selectFirst("p")?.text()?.trim() ?: return null
         val posterUrl = this.selectFirst("img")?.attr("src")
-        
-        return MovieSearchResponse(
-            title,
-            link,
-            this@SenpaiStreamProvider.name,
-            TvType.Movie,
-            posterUrl,
-            null,
-            null
-        )
+
+        return newMovieSearchResponse(title, fixUrl(link), TvType.Movie) {
+            this.posterUrl = posterUrl
+        }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
         val document = app.get("$mainUrl/search?q=$query").document
-        return document.select("div.grid.grid-cols-2 > div").mapNotNull {
+        return document.select("div.grid.grid-cols-2 > div, div.flex.flex-wrap.gap-4 > a").mapNotNull {
             it.toSearchResponse()
         }
     }
@@ -67,79 +63,87 @@ class SenpaiStreamProvider : MainAPI() {
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: return null
         val poster = document.selectFirst("img[alt='Cover']")?.attr("src")
+            ?: document.selectFirst("div.poster img, div.fposter img")?.attr("src")
         val description = document.selectFirst("meta[name='description']")?.attr("content")
         val yearStr = document.selectFirst("div.flex.items-center.text-gray-400 span:contains(20)")?.text()
-        val year = yearStr?.filter { it.isDigit() }?.toIntOrNull()
+        val year = yearStr?.filter { it.isDigit() }?.take(4)?.toIntOrNull()
 
-        val type = if (url.contains("/movie/")) TvType.Movie else TvType.TvSeries
+        val type = if (url.contains("/series/") || url.contains("/tv-show/") || url.contains("/anime/")) TvType.TvSeries else TvType.Movie
 
-        val episodes = document.select("ul.space-y-2 a[href*='/movie/']").mapNotNull { episodeElement ->
+        val episodes = document.select("ul.space-y-2 a, div.episode-list a").mapNotNull { episodeElement ->
             val episodeUrl = episodeElement.attr("href") ?: return@mapNotNull null
             val episodeTitle = episodeElement.selectFirst("span")?.text()?.trim() ?: episodeElement.text().trim()
-            val episodeNum = episodeTitle.substringAfterLast(" ").filter { it.isDigit() }.toIntOrNull()
+            val episodeNum = Regex("""(\d+)""").find(episodeTitle)?.groupValues?.get(1)?.toIntOrNull()
 
             Episode(
-                data = episodeUrl,
-                name = episodeTitle,
-                episode = episodeNum
+                fixUrl(episodeUrl),
+                episodeTitle,
+                null,
+                episodeNum,
             )
         }
 
-        return if (episodes.isNotEmpty()) {
-            TvSeriesLoadResponse(
-                title,
-                url,
-                this.name,
-                TvType.TvSeries,
-                episodes,
-                poster,
-                year,
-                description,
-                null
-            )
+        return if (episodes.isNotEmpty() && type == TvType.TvSeries) {
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+                this.posterUrl = poster
+                this.plot = description
+                this.year = year
+            }
         } else {
-            MovieLoadResponse(
-                title,
-                url,
-                this.name,
-                TvType.Movie,
-                url,
-                poster,
-                year,
-                description,
-                null
-            )
+            newMovieLoadResponse(title, url, TvType.Movie, url) {
+                this.posterUrl = poster
+                this.plot = description
+                this.year = year
+            }
         }
     }
 
     override suspend fun loadLinks(
         data: String,
-        isDownload: Boolean,
-        callback: (ExtractorLink) -> Unit
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
     ): Boolean {
-        val document = app.get(data).document
-        val livewireDiv = document.selectFirst("div[wire:snapshot]") ?: return false
-        val snapshotRaw = livewireDiv.attr("wire:snapshot")
-        
-        // Decoding the snapshot
-        // The snapshot is HTML escaped JSON.
-        val snapshotJson = AppUtils.parseJson<LivewireSnapshot>(snapshotRaw.replace("&quot;", "\""))
-        
-        // Navigate the complex Livewire structure
-        // structure seems to be: data -> videos -> ...
-        // We need a proper JSON parser or a helper function.
-        // Since we can't easily debug, let's try to find the video file in the JSON string directly using Regex.
-        
-        val videoUrlRegex = Regex("""https://[^"]+\.r2\.cloudflarestorage\.com/[^"]+\.mp4\?[^"]+""")
-        val match = videoUrlRegex.find(snapshotRaw.replace("&quot;", "\""))
-        
-        if (match != null) {
-            val videoUrl = match.value
+        val document = app.get(fixUrl(data)).document
+
+        // Strategy 1: Look for direct video URL in Livewire wire:snapshot
+        val livewireDiv = document.selectFirst("div[wire:snapshot]")
+        if (livewireDiv != null) {
+            val snapshotRaw = livewireDiv.attr("wire:snapshot")
+                .replace("&quot;", "\"")
+                .replace("&amp;", "&")
+
+            // Find Cloudflare R2 video URL in snapshot
+            val videoUrlRegex = Regex("""https://[^"]+\.r2\.cloudflarestorage\.com/[^"]+\.mp4\?[^"]+""")
+            val match = videoUrlRegex.find(snapshotRaw)
+
+            if (match != null) {
+                callback.invoke(
+                    ExtractorLink(
+                        this.name,
+                        this.name,
+                        match.value.replace("\\u0026", "&"),
+                        "",
+                        Qualities.Unknown.value,
+                        false
+                    )
+                )
+                return true
+            }
+        }
+
+        // Strategy 2: Look for video URL in page scripts
+        val scriptContent = document.select("script").mapNotNull { it.data().ifEmpty { null } }
+            .joinToString("\n")
+
+        val scriptVideoRegex = Regex("""(?:file|src|source|url)\s*[:=]\s*["'](https://[^"']+\.mp4[^"']*)["']""")
+        val scriptMatch = scriptVideoRegex.find(scriptContent)
+        if (scriptMatch != null) {
             callback.invoke(
                 ExtractorLink(
                     this.name,
-                    "SenpaiStream",
-                    videoUrl,
+                    this.name,
+                    scriptMatch.groupValues[1].replace("\\u0026", "&"),
                     "",
                     Qualities.Unknown.value,
                     false
@@ -147,15 +151,36 @@ class SenpaiStreamProvider : MainAPI() {
             )
             return true
         }
-        
+
+        // Strategy 3: Look for iframe embeds
+        document.select("iframe").forEach { iframe ->
+            val iframeSrc = iframe.attr("src")
+            if (iframeSrc.isNotEmpty()) {
+                // Try to load the iframe page and extract video URL
+                try {
+                    val iframeDoc = app.get(fixUrl(iframeSrc)).document
+                    val iframeScript = iframeDoc.select("script").mapNotNull { it.data().ifEmpty { null } }
+                        .joinToString("\n")
+                    val iframeMatch = scriptVideoRegex.find(iframeScript)
+                    if (iframeMatch != null) {
+                        callback.invoke(
+                            ExtractorLink(
+                                this.name,
+                                this.name,
+                                iframeMatch.groupValues[1].replace("\\u0026", "&"),
+                                "",
+                                Qualities.Unknown.value,
+                                false
+                            )
+                        )
+                        return true
+                    }
+                } catch (_: Exception) {
+                    // Ignore iframe loading errors
+                }
+            }
+        }
+
         return false
     }
-
-    data class LivewireSnapshot(
-        val data: LivewireData
-    )
-    
-    data class LivewireData(
-        val videos: Any? // Dynamic structure
-    )
 }
