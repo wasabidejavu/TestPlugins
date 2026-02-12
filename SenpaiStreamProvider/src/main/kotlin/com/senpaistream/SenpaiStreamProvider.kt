@@ -1,9 +1,7 @@
 package com.senpaistream
 
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
-import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.Qualities
+import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
 
 class SenpaiStreamProvider : MainAPI() {
@@ -43,7 +41,9 @@ class SenpaiStreamProvider : MainAPI() {
         } else {
             this.selectFirst("a")?.attr("href")
         } ?: return null
-        val title = this.selectFirst("h3")?.text()?.trim() ?: this.selectFirst("p")?.text()?.trim() ?: return null
+        val title = this.selectFirst("h3")?.text()?.trim()
+            ?: this.selectFirst("p")?.text()?.trim()
+            ?: return null
         val posterUrl = this.selectFirst("img")?.attr("src")
 
         return newMovieSearchResponse(title, fixUrl(link), TvType.Movie) {
@@ -75,12 +75,10 @@ class SenpaiStreamProvider : MainAPI() {
             val episodeTitle = episodeElement.selectFirst("span")?.text()?.trim() ?: episodeElement.text().trim()
             val episodeNum = Regex("""(\d+)""").find(episodeTitle)?.groupValues?.get(1)?.toIntOrNull()
 
-            Episode(
-                fixUrl(episodeUrl),
-                episodeTitle,
-                null,
-                episodeNum,
-            )
+            newEpisode(fixUrl(episodeUrl)) {
+                this.name = episodeTitle
+                this.episode = episodeNum
+            }
         }
 
         return if (episodes.isNotEmpty() && type == TvType.TvSeries) {
@@ -118,15 +116,16 @@ class SenpaiStreamProvider : MainAPI() {
             val match = videoUrlRegex.find(snapshotRaw)
 
             if (match != null) {
+                val videoUrl = match.value.replace("\\u0026", "&")
                 callback.invoke(
-                    ExtractorLink(
-                        this.name,
-                        this.name,
-                        match.value.replace("\\u0026", "&"),
-                        "",
-                        Qualities.Unknown.value,
-                        false
-                    )
+                    newExtractorLink(
+                        source = this.name,
+                        name = this.name,
+                        url = videoUrl,
+                    ) {
+                        this.referer = ""
+                        this.quality = Qualities.Unknown.value
+                    }
                 )
                 return true
             }
@@ -139,15 +138,16 @@ class SenpaiStreamProvider : MainAPI() {
         val scriptVideoRegex = Regex("""(?:file|src|source|url)\s*[:=]\s*["'](https://[^"']+\.mp4[^"']*)["']""")
         val scriptMatch = scriptVideoRegex.find(scriptContent)
         if (scriptMatch != null) {
+            val videoUrl = scriptMatch.groupValues[1].replace("\\u0026", "&")
             callback.invoke(
-                ExtractorLink(
-                    this.name,
-                    this.name,
-                    scriptMatch.groupValues[1].replace("\\u0026", "&"),
-                    "",
-                    Qualities.Unknown.value,
-                    false
-                )
+                newExtractorLink(
+                    source = this.name,
+                    name = this.name,
+                    url = videoUrl,
+                ) {
+                    this.referer = ""
+                    this.quality = Qualities.Unknown.value
+                }
             )
             return true
         }
@@ -156,22 +156,22 @@ class SenpaiStreamProvider : MainAPI() {
         document.select("iframe").forEach { iframe ->
             val iframeSrc = iframe.attr("src")
             if (iframeSrc.isNotEmpty()) {
-                // Try to load the iframe page and extract video URL
                 try {
                     val iframeDoc = app.get(fixUrl(iframeSrc)).document
                     val iframeScript = iframeDoc.select("script").mapNotNull { it.data().ifEmpty { null } }
                         .joinToString("\n")
                     val iframeMatch = scriptVideoRegex.find(iframeScript)
                     if (iframeMatch != null) {
+                        val videoUrl = iframeMatch.groupValues[1].replace("\\u0026", "&")
                         callback.invoke(
-                            ExtractorLink(
-                                this.name,
-                                this.name,
-                                iframeMatch.groupValues[1].replace("\\u0026", "&"),
-                                "",
-                                Qualities.Unknown.value,
-                                false
-                            )
+                            newExtractorLink(
+                                source = this.name,
+                                name = this.name,
+                                url = videoUrl,
+                            ) {
+                                this.referer = ""
+                                this.quality = Qualities.Unknown.value
+                            }
                         )
                         return true
                     }
