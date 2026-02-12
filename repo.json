@@ -1,0 +1,9 @@
+{
+    "name": "Senpai Stream Repository",
+    "description": "Extension Cloudstream pour Senpai Stream",
+    "manifestVersion": 1,
+    "pluginLists": [
+        "https://raw.githubusercontent.com/wasabidejavu/TestPlugins/builds/plugins.json"
+    ],
+    "iconUrl": "https://senpai-stream.hair/favicon/apple-touch-icon.png"
+}

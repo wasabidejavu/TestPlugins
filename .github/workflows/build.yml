@@ -40,6 +40,7 @@ jobs:
           mkdir -p ../builds
           cp **/build/*.cs3 ../builds
           cp build/plugins.json ../builds
+          cp repo.json ../builds
 
       - name: Push builds
         run: |
