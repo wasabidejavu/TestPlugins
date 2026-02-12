@@ -44,7 +44,9 @@ class SenpaiStreamProvider : MainAPI() {
         val title = this.selectFirst("h3")?.text()?.trim()
             ?: this.selectFirst("p")?.text()?.trim()
             ?: return null
-        val posterUrl = this.selectFirst("img")?.attr("src")
+        val posterUrl = this.selectFirst("img")?.let { img ->
+            img.attr("data-src").ifEmpty { img.attr("src") }
+        }
 
         return newMovieSearchResponse(title, fixUrl(link), TvType.Movie) {
             this.posterUrl = posterUrl
@@ -52,9 +54,18 @@ class SenpaiStreamProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.get("$mainUrl/search?q=$query").document
-        return document.select("div.grid.grid-cols-2 > div, div.flex.flex-wrap.gap-4 > a").mapNotNull {
-            it.toSearchResponse()
+        val googleQuery = "site:senpai-stream.hair $query"
+        val url = "https://www.google.com/search?q=${googleQuery.replace(" ", "+")}"
+        val document = app.get(url).document
+        
+        return document.select("div.g").mapNotNull {
+            val link = it.selectFirst("a")?.attr("href") ?: return@mapNotNull null
+            val title = it.selectFirst("h3")?.text() ?: return@mapNotNull null
+            if (!link.contains("senpai-stream.hair")) return@mapNotNull null
+            
+            newMovieSearchResponse(title, fixUrl(link), TvType.Movie) {
+                // No poster for google results easily
+            }
         }
     }
 
@@ -62,8 +73,11 @@ class SenpaiStreamProvider : MainAPI() {
         val document = app.get(url).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: return null
-        val poster = document.selectFirst("img[alt='Cover']")?.attr("src")
-            ?: document.selectFirst("div.poster img, div.fposter img")?.attr("src")
+        val poster = document.selectFirst("img[alt='Cover']")?.let { img ->
+            img.attr("data-src").ifEmpty { img.attr("src") }
+        } ?: document.selectFirst("div.poster img, div.fposter img")?.let { img ->
+            img.attr("data-src").ifEmpty { img.attr("src") }
+        }
         val description = document.selectFirst("meta[name='description']")?.attr("content")
         val yearStr = document.selectFirst("div.flex.items-center.text-gray-400 span:contains(20)")?.text()
         val year = yearStr?.filter { it.isDigit() }?.take(4)?.toIntOrNull()
@@ -104,18 +118,17 @@ class SenpaiStreamProvider : MainAPI() {
     ): Boolean {
         val document = app.get(fixUrl(data)).document
 
-        // Strategy 1: Look for direct video URL in Livewire wire:snapshot
+        // Strategy 1: Look for any http link ending in mp4/m3u8 within wire:snapshot
         val livewireDiv = document.selectFirst("div[wire:snapshot]")
         if (livewireDiv != null) {
             val snapshotRaw = livewireDiv.attr("wire:snapshot")
                 .replace("&quot;", "\"")
                 .replace("&amp;", "&")
+                .replace("\\/", "/")
 
-            // Find Cloudflare R2 video URL in snapshot
-            val videoUrlRegex = Regex("""https://[^"]+\.r2\.cloudflarestorage\.com/[^"]+\.mp4\?[^"]+""")
-            val match = videoUrlRegex.find(snapshotRaw)
-
-            if (match != null) {
+            // Broader regex for any MP4/M3U8 URL
+            val videoUrlRegex = Regex("""https?://[^"]+\.(?:mp4|m3u8)(?:\?[^"]*)?""")
+            videoUrlRegex.findAll(snapshotRaw).forEach { match ->
                 val videoUrl = match.value.replace("\\u0026", "&")
                 callback.invoke(
                     newExtractorLink(
@@ -123,45 +136,41 @@ class SenpaiStreamProvider : MainAPI() {
                         name = this.name,
                         url = videoUrl,
                     ) {
-                        this.referer = ""
+                        this.referer = mainUrl
                         this.quality = Qualities.Unknown.value
                     }
                 )
-                return true
             }
         }
 
-        // Strategy 2: Look for video URL in page scripts
+        // Strategy 2: Look for video URL in page scripts (broader regex)
         val scriptContent = document.select("script").mapNotNull { it.data().ifEmpty { null } }
             .joinToString("\n")
 
-        val scriptVideoRegex = Regex("""(?:file|src|source|url)\s*[:=]\s*["'](https://[^"']+\.mp4[^"']*)["']""")
-        val scriptMatch = scriptVideoRegex.find(scriptContent)
-        if (scriptMatch != null) {
-            val videoUrl = scriptMatch.groupValues[1].replace("\\u0026", "&")
+        val scriptVideoRegex = Regex("""["'](https?://[^"']+\.(?:mp4|m3u8)[^"']*)["']""")
+        scriptVideoRegex.findAll(scriptContent).forEach { match ->
+            val videoUrl = match.groupValues[1].replace("\\u0026", "&")
             callback.invoke(
                 newExtractorLink(
                     source = this.name,
                     name = this.name,
                     url = videoUrl,
                 ) {
-                    this.referer = ""
+                    this.referer = mainUrl
                     this.quality = Qualities.Unknown.value
                 }
             )
-            return true
         }
 
         // Strategy 3: Look for iframe embeds
         document.select("iframe").forEach { iframe ->
             val iframeSrc = iframe.attr("src")
-            if (iframeSrc.isNotEmpty()) {
+            if (iframeSrc.isNotEmpty() && !iframeSrc.contains("youtube")) {
                 try {
                     val iframeDoc = app.get(fixUrl(iframeSrc)).document
                     val iframeScript = iframeDoc.select("script").mapNotNull { it.data().ifEmpty { null } }
                         .joinToString("\n")
-                    val iframeMatch = scriptVideoRegex.find(iframeScript)
-                    if (iframeMatch != null) {
+                    scriptVideoRegex.findAll(iframeScript).forEach { iframeMatch ->
                         val videoUrl = iframeMatch.groupValues[1].replace("\\u0026", "&")
                         callback.invoke(
                             newExtractorLink(
@@ -169,11 +178,10 @@ class SenpaiStreamProvider : MainAPI() {
                                 name = this.name,
                                 url = videoUrl,
                             ) {
-                                this.referer = ""
+                                this.referer = mainUrl
                                 this.quality = Qualities.Unknown.value
                             }
                         )
-                        return true
                     }
                 } catch (_: Exception) {
                     // Ignore iframe loading errors
@@ -181,6 +189,6 @@ class SenpaiStreamProvider : MainAPI() {
             }
         }
 
-        return false
+        return true
     }
 }
