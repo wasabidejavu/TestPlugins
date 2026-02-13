@@ -207,7 +207,7 @@ class SenpaiStreamProvider : MainAPI() {
                         // Cloudstream app.post with 'data' as map sends Form URL Encoded or JSON? 
                         // Usually easier to send string body for JSON.
                     ),
-                    requestBody = AppUtils.toJson(payload)
+                    requestBody = mapper.writeValueAsString(payload)
                 )
 
                 val responseJson = AppUtils.parseJson<Map<String, Any>>(response.text)
