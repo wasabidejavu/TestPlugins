@@ -1,0 +1,56 @@
+{
+  "data": {
+    "cover": "https://cdn.senpai-stream.tv/t/p/w1280_and_h720_bestv2/szdrVdnS8XAzqFyzPDhYXaJk7EK.jpg",
+    "countdown": 5,
+    "showAd": false,
+    "progressAd": true,
+    "progressAdUrl": "https://ey43.com/4/10080272",
+    "currentStep": 0,
+    "total_steps": "5",
+    "percentage": 0,
+    "listing": [
+      null,
+      {
+        "class": "App\\Models\\Post",
+        "key": 2538,
+        "s": "mdl"
+      }
+    ],
+    "videos": [
+      [
+        [
+          {
+            "label": "Version Fran\u00e7aise Qu\u00e9b\u00e9coise",
+            "type": "mp4",
+            "index": 0,
+            "source": "local"
+          },
+          {
+            "s": "arr"
+          }
+        ]
+      ],
+      {
+        "s": "arr"
+      }
+    ],
+    "isPreloader": true,
+    "cf_turnstile_response": null,
+    "prevEpisodeUrl": null,
+    "nextEpisodeUrl": null
+  },
+  "memo": {
+    "id": "dw0zhADzar2FExXrxNSS",
+    "name": "watch-component",
+    "path": "movie/la-femme-de-menage",
+    "method": "GET",
+    "children": [],
+    "scripts": [
+      "2116771625-0"
+    ],
+    "assets": [],
+    "errors": [],
+    "locale": "fr"
+  },
+  "checksum": "82c2e5ff6ae4b2a7ef335813410e48043316eeb21738c98083f854058cb16b35"
+}

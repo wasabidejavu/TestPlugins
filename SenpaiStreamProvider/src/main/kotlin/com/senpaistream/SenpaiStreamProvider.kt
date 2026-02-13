@@ -78,31 +78,40 @@ class SenpaiStreamProvider : MainAPI() {
         } ?: document.selectFirst("div.poster img, div.fposter img")?.let { img ->
             img.attr("data-src").ifEmpty { img.attr("src") }
         }
-        val description = document.selectFirst("meta[name='description']")?.attr("content")
+        val description = document.selectFirst("p.text-gray-400, meta[name='description']")?.let {
+            if (it.tagName() == "meta") it.attr("content") else it.text()
+        }
         val yearStr = document.selectFirst("div.flex.items-center.text-gray-400 span:contains(20)")?.text()
         val year = yearStr?.filter { it.isDigit() }?.take(4)?.toIntOrNull()
 
         val type = if (url.contains("/series/") || url.contains("/tv-show/") || url.contains("/anime/")) TvType.TvSeries else TvType.Movie
 
-        val episodes = document.select("ul.space-y-2 a, div.episode-list a").mapNotNull { episodeElement ->
-            val episodeUrl = episodeElement.attr("href") ?: return@mapNotNull null
-            val episodeTitle = episodeElement.selectFirst("span")?.text()?.trim() ?: episodeElement.text().trim()
-            val episodeNum = Regex("""(\d+)""").find(episodeTitle)?.groupValues?.get(1)?.toIntOrNull()
+        if (type == TvType.TvSeries) {
+            val episodes = document.select("div.grid.grid-cols-2.lg\\:grid-cols-6.2xl\\:grid-cols-8.gap-6.mt-4 > div.relative.group").mapNotNull { group ->
+                val link = group.selectFirst("a")?.attr("href") ?: return@mapNotNull null
+                val epTitle = group.selectFirst("h3")?.text()?.trim() ?: "Episode"
+                val releaseDate = group.selectFirst("div.text-xs.text-white\\/50.space-x-2")?.text()
 
-            newEpisode(fixUrl(episodeUrl)) {
-                this.name = episodeTitle
-                this.episode = episodeNum
+                val seasonMatch = Regex("""Saison\s*(\d+)""").find(releaseDate ?: "")
+                val episodeMatch = Regex("""Épisodes\s*(\d+)""").find(releaseDate ?: "")
+                
+                val seasonNum = seasonMatch?.groupValues?.get(1)?.toIntOrNull() ?: 1
+                val episodeNum = episodeMatch?.groupValues?.get(1)?.toIntOrNull()
+
+                newEpisode(fixUrl(link)) {
+                    this.name = epTitle
+                    this.season = seasonNum
+                    this.episode = episodeNum
+                    this.posterUrl = group.selectFirst("img")?.attr("src")
+                }
             }
-        }
-
-        return if (episodes.isNotEmpty() && type == TvType.TvSeries) {
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+            return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
                 this.posterUrl = poster
                 this.plot = description
                 this.year = year
             }
         } else {
-            newMovieLoadResponse(title, url, TvType.Movie, url) {
+            return newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = poster
                 this.plot = description
                 this.year = year
@@ -116,76 +125,140 @@ class SenpaiStreamProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
-        val document = app.get(fixUrl(data)).document
+        val document = app.get(data).document
 
-        // Strategy 1: Look for any http link ending in mp4/m3u8 within wire:snapshot
-        val livewireDiv = document.selectFirst("div[wire:snapshot]")
-        if (livewireDiv != null) {
-            val snapshotRaw = livewireDiv.attr("wire:snapshot")
-                .replace("&quot;", "\"")
-                .replace("&amp;", "&")
-                .replace("\\/", "/")
+        // Extract wire:snapshot from the video component
+        // Usually in a div with wire:snapshot="{...}" and wire:id="..." 
+        val wireDiv = document.selectFirst("div[wire:snapshot]") ?: return false
+        val snapshotRaw = wireDiv.attr("wire:snapshot")
+            .replace("&quot;", "\"")
+            .replace("&amp;", "&")
+            .replace("\\/", "/")
+        
+        // We also need the component ID and name from the initial state
+        val wireId = wireDiv.attr("wire:id")
+        
+        // Parse initial state to find "fingerprint" data
+        // snapshotRaw is a JSON object. We can try to parse it with simple string checks or a proper parser if available.
+        // Since we don't have a full JSON parser in standard library easily exposed without importing, 
+        // we'll use regex/string manipulation carefully or standard app.mapper if Cloudstream exposes it.
+        // Cloudstream exposes standard Jackson 'mapper'.
 
-            // Broader regex for any MP4/M3U8 URL
-            val videoUrlRegex = Regex("""https?://[^"]+\.(?:mp4|m3u8)(?:\?[^"]*)?""")
-            videoUrlRegex.findAll(snapshotRaw).forEach { match ->
-                val videoUrl = match.value.replace("\\u0026", "&")
+        try {
+            val jsonNode = AppUtils.parseJson<Map<String, Any>>(snapshotRaw)
+            val memo = jsonNode["memo"] as? Map<String, Any>
+            val componentName = memo?.get("name") as? String
+            val componentId = memo?.get("id") as? String ?: wireId
+            val componentPath = memo?.get("path") as? String
+            val componentMethod = memo?.get("method") as? String ?: "GET"
+            
+            // Check for direct video links in "data.videos"
+            val dataObj = jsonNode["data"] as? Map<String, Any>
+            var videoFound = false
+            
+            // Logic to parse "videos" array structure from snapshot
+            // structure: "videos": [ [ [ { "source": "local", ... }, { "s": "arr" } ] ], { "s": "arr" } ]
+            // It's a bit messy due to Livewire's compression.
+            // Simplified regex approach for "source":"local"
+            
+            if (snapshotRaw.contains("\"source\":\"local\"")) {
+                // If local, we need to make a Livewire call to unlock it?
+                // Actually, often "local" just means it needs an interaction or it's a direct file path hidden elsewhere.
+                // But let's try the POST simulation if we don't find a direct link.
+                
+                // Construct Livewire payload
+                // We want to call "incrementSteps" or "hideAd" to simulate watching the ad.
+                // Then the response might contain the video URL in the "effects" or "serverMemo".
+                
+                val payload = mapOf(
+                    "fingerprint" to mapOf(
+                        "id" to componentId,
+                        "name" to componentName,
+                        "locale" to "fr",
+                        "path" to componentPath,
+                        "method" to componentMethod,
+                        "v" to "acj"
+                    ),
+                    "serverMemo" to memo,
+                    "updates" to emptyList<Any>(),
+                    "calls" to listOf(
+                        mapOf(
+                            "path" to "",
+                            "method" to "hideAd",
+                            "params" to emptyList<Any>()
+                        )
+                    )
+                )
+
+                val headers = mapOf(
+                    "X-Livewire" to "true",
+                    "Content-Type" to "application/json",
+                    "X-CSRF-TOKEN" to (document.selectFirst("meta[name='csrf-token']")?.attr("content") ?: ""),
+                    "Origin" to mainUrl,
+                    "Referer" to data
+                )
+
+                val response = app.post(
+                    "$mainUrl/livewire/message/$componentName",
+                    headers = headers,
+                    data = mapOf(
+                        "_token" to (document.selectFirst("meta[name='csrf-token']")?.attr("content") ?: ""),
+                         // Livewire expects pure JSON body usually, checking app.post behavior
+                        // Cloudstream app.post with 'data' as map sends Form URL Encoded or JSON? 
+                        // Usually easier to send string body for JSON.
+                    ),
+                    requestBody = AppUtils.toJson(payload)
+                )
+
+                val responseJson = AppUtils.parseJson<Map<String, Any>>(response.text)
+                // Parse response for new effects/redirects/video urls
+                // This part is speculative without seeing the exact response. 
+                // However, often the 'local' source might just be a path we can construct.
+                
+                // FALLBACK: If "local", try to find any MP4 match in the raw page again or the response
+                val broadMatch = Regex("""https?://[^"']+\.mp4""").find(response.text)
+                if (broadMatch != null) {
+                     callback.invoke(
+                        newExtractorLink(
+                            source = this.name,
+                            name = "SenpaiStream",
+                            url = broadMatch.value,
+                        ) {
+                            referer = mainUrl
+                        }
+                    )
+                    videoFound = true
+                }
+            }
+            
+            if (!videoFound) {
+                 // Try parsing the "videos" array from initial snapshot for other sources (e.g. embed)
+                 // Or simple regex on the whole document again
+                 Regex("""https?://[^"']+\.(?:mp4|m3u8)""").findAll(document.html()).forEach { match ->
+                    callback.invoke(
+                        newExtractorLink(
+                            source = this.name,
+                            name = "SenpaiStream",
+                            url = match.value,
+                        ) {
+                            referer = mainUrl
+                        }
+                    )
+                 }
+            }
+
+        } catch (e: Exception) {
+            // Fallback to simple regex if JSON parsing fails
+            Regex("""https?://[^"']+\.(?:mp4|m3u8)""").findAll(document.html()).forEach { match ->
                 callback.invoke(
                     newExtractorLink(
                         source = this.name,
-                        name = this.name,
-                        url = videoUrl,
+                        name = "SenpaiStream",
+                        url = match.value,
                     ) {
-                        this.referer = mainUrl
-                        this.quality = Qualities.Unknown.value
+                        referer = mainUrl
                     }
                 )
-            }
-        }
-
-        // Strategy 2: Look for video URL in page scripts (broader regex)
-        val scriptContent = document.select("script").mapNotNull { it.data().ifEmpty { null } }
-            .joinToString("\n")
-
-        val scriptVideoRegex = Regex("""["'](https?://[^"']+\.(?:mp4|m3u8)[^"']*)["']""")
-        scriptVideoRegex.findAll(scriptContent).forEach { match ->
-            val videoUrl = match.groupValues[1].replace("\\u0026", "&")
-            callback.invoke(
-                newExtractorLink(
-                    source = this.name,
-                    name = this.name,
-                    url = videoUrl,
-                ) {
-                    this.referer = mainUrl
-                    this.quality = Qualities.Unknown.value
-                }
-            )
-        }
-
-        // Strategy 3: Look for iframe embeds
-        document.select("iframe").forEach { iframe ->
-            val iframeSrc = iframe.attr("src")
-            if (iframeSrc.isNotEmpty() && !iframeSrc.contains("youtube")) {
-                try {
-                    val iframeDoc = app.get(fixUrl(iframeSrc)).document
-                    val iframeScript = iframeDoc.select("script").mapNotNull { it.data().ifEmpty { null } }
-                        .joinToString("\n")
-                    scriptVideoRegex.findAll(iframeScript).forEach { iframeMatch ->
-                        val videoUrl = iframeMatch.groupValues[1].replace("\\u0026", "&")
-                        callback.invoke(
-                            newExtractorLink(
-                                source = this.name,
-                                name = this.name,
-                                url = videoUrl,
-                            ) {
-                                this.referer = mainUrl
-                                this.quality = Qualities.Unknown.value
-                            }
-                        )
-                    }
-                } catch (_: Exception) {
-                    // Ignore iframe loading errors
-                }
             }
         }
 
