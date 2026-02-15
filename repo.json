@@ -3,7 +3,7 @@
     "description": "Cloudstream extension for Senpai-Stream.hair",
     "version": 1,
     "manifestVersion": 1,
-    "pluginUrl": "https://raw.githubusercontent.com/USER_REPO/Senpaistream-scraper/master/SenpaiStreamProvider/build/libs/SenpaiStreamProvider.jar",
+    "pluginUrl": "https://raw.githubusercontent.com/wasabidejavu/TestPlugins/builds/SenpaiStreamProvider.cs3",
     "requiresResources": false,
     "language": "fr",
     "types": [

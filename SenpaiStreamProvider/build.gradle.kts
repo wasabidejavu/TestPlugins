@@ -26,5 +26,5 @@ cloudstream {
     language = "fr"
 
     // Icon URL
-    iconUrl = "https://senpai-stream.hair/favicon/apple-touch-icon.png"
+    iconUrl = "https://senpai-stream.hair/favicon/favicon-32x32.png"
 }

@@ -14,6 +14,7 @@ class SenpaiStreamProvider : MainAPI() {
     override val hasMainPage = true
     override var lang = "fr"
     override val hasDownloadSupport = true
+    override val hasCloudflareProtection = true
     override val supportedTypes = setOf(
         TvType.Movie,
         TvType.TvSeries,
@@ -21,22 +22,49 @@ class SenpaiStreamProvider : MainAPI() {
     )
 
     override val mainPage = mainPageOf(
+        "Top 10 des films aujourd’hui" to "Top 10 Films",
+        "Top 10 des séries aujourd’hui" to "Top 10 Séries",
+        "Nouveaux films sur Senpai-Stream" to "Nouveaux Films",
+        "Nouvelles séries sur Senpai-Stream" to "Nouvelles Séries",
+        "Top 10 des animés aujourd’hui" to "Top 10 Animés",
+        "$mainUrl/trending" to "Tendances",
         "$mainUrl/movies" to "Films",
         "$mainUrl/tv-shows" to "Séries",
         "$mainUrl/animes" to "Animés",
-        "$mainUrl/trending" to "Tendances",
     )
 
     override suspend fun getMainPage(
         page: Int,
         request: MainPageRequest
     ): HomePageResponse {
-        val url = if (page == 1) request.data else "${request.data}?page=$page"
-        val document = app.get(url).document
-        val home = document.select("div.relative.group.overflow-hidden").mapNotNull {
-            it.toSearchResponse()
+        val items = if (!request.data.startsWith("http")) {
+            val document = app.get(mainUrl).document
+            val header = document.select("h3").find { it.text().contains(request.data, ignoreCase = true) }
+            
+            // Try to find the container: usually the next sibling, or inside the next sibling
+            // We look for the grid/swiper container following the header
+            var container = header?.nextElementSibling()
+            while (container != null && !container.classNames().any { it.contains("grid") || it.contains("swiper") }) {
+                 container = container.nextElementSibling()
+            }
+            
+            // If direct sibling check failed, try a broader look (e.g. parent's sibling) if needed, 
+            // but for now let's assume standard structure or fallback to finding cards within the 'next' structure.
+            // Actually, if we can't find a specific container, let's just grab the next element that contains our card selector.
+            
+            val safeContainer = container ?: header?.parent()?.nextElementSibling() ?: document
+            
+            safeContainer.select("div.relative.group.overflow-hidden").mapNotNull {
+                it.toSearchResponse()
+            }
+        } else {
+            val url = if (page == 1) request.data else "${request.data}?page=$page"
+            val document = app.get(url).document
+            document.select("div.relative.group.overflow-hidden").mapNotNull {
+                it.toSearchResponse()
+            }
         }
-        return newHomePageResponse(request.name, home)
+        return newHomePageResponse(request.name, items)
     }
 
     private fun Element.toSearchResponse(): SearchResponse? {
