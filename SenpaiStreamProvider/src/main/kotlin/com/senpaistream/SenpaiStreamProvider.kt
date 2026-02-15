@@ -2,6 +2,9 @@ package com.senpaistream
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.nicehttp.RequestBodyTypes
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.jsoup.nodes.Element
 
 class SenpaiStreamProvider : MainAPI() {
@@ -29,7 +32,7 @@ class SenpaiStreamProvider : MainAPI() {
     ): HomePageResponse {
         val url = if (page == 1) request.data else "${request.data}?page=$page"
         val document = app.get(url).document
-        val home = document.select("div.grid.grid-cols-2 > div, div.flex.flex-wrap.gap-4 > a").mapNotNull {
+        val home = document.select("div.relative.group.overflow-hidden").mapNotNull {
             it.toSearchResponse()
         }
         return newHomePageResponse(request.name, home)
@@ -48,24 +51,22 @@ class SenpaiStreamProvider : MainAPI() {
             img.attr("data-src").ifEmpty { img.attr("src") }
         }
 
-        return newMovieSearchResponse(title, fixUrl(link), TvType.Movie) {
+        val type = when {
+            link.contains("/tv-show/") -> TvType.TvSeries
+            link.contains("/anime/") -> TvType.Anime
+            else -> TvType.Movie
+        }
+        return newMovieSearchResponse(title, fixUrl(link), type) {
             this.posterUrl = posterUrl
         }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val googleQuery = "site:senpai-stream.hair $query"
-        val url = "https://www.google.com/search?q=${googleQuery.replace(" ", "+")}"
+        val url = "$mainUrl/search/${query.replace(" ", "%20")}"
         val document = app.get(url).document
-        
-        return document.select("div.g").mapNotNull {
-            val link = it.selectFirst("a")?.attr("href") ?: return@mapNotNull null
-            val title = it.selectFirst("h3")?.text() ?: return@mapNotNull null
-            if (!link.contains("senpai-stream.hair")) return@mapNotNull null
-            
-            newMovieSearchResponse(title, fixUrl(link), TvType.Movie) {
-                // No poster for google results easily
-            }
+
+        return document.select("div.relative.group.overflow-hidden").mapNotNull {
+            it.toSearchResponse()
         }
     }
 
@@ -201,13 +202,7 @@ class SenpaiStreamProvider : MainAPI() {
                 val response = app.post(
                     "$mainUrl/livewire/message/$componentName",
                     headers = headers,
-                    data = mapOf(
-                        "_token" to (document.selectFirst("meta[name='csrf-token']")?.attr("content") ?: ""),
-                         // Livewire expects pure JSON body usually, checking app.post behavior
-                        // Cloudstream app.post with 'data' as map sends Form URL Encoded or JSON? 
-                        // Usually easier to send string body for JSON.
-                    ),
-                    requestBody = mapper.writeValueAsString(payload)
+                    requestBody = AppUtils.toJson(payload).toRequestBody(RequestBodyTypes.JSON.toMediaTypeOrNull())
                 )
 
                 val responseJson = AppUtils.parseJson<Map<String, Any>>(response.text)
