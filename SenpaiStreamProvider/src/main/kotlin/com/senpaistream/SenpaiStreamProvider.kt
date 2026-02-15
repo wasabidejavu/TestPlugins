@@ -14,7 +14,7 @@ class SenpaiStreamProvider : MainAPI() {
     override val hasMainPage = true
     override var lang = "fr"
     override val hasDownloadSupport = true
-    override val hasCloudflareProtection = true
+    override val hasDownloadSupport = true
     override val supportedTypes = setOf(
         TvType.Movie,
         TvType.TvSeries,
