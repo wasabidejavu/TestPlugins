@@ -202,7 +202,7 @@ class SenpaiStreamProvider : MainAPI() {
                 val response = app.post(
                     "$mainUrl/livewire/message/$componentName",
                     headers = headers,
-                    requestBody = AppUtils.toJson(payload).toRequestBody(RequestBodyTypes.JSON.toMediaTypeOrNull())
+                    requestBody = payload.toJson().toRequestBody(RequestBodyTypes.JSON.toMediaTypeOrNull())
                 )
 
                 val responseJson = AppUtils.parseJson<Map<String, Any>>(response.text)
