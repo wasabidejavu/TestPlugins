@@ -1,17 +1,8 @@
 {
     "name": "SenpaiStream Scraper",
     "description": "Cloudstream extension for Senpai-Stream.hair",
-    "version": 1,
     "manifestVersion": 1,
-    "pluginUrl": "https://raw.githubusercontent.com/wasabidejavu/TestPlugins/builds/SenpaiStreamProvider.cs3",
-    "requiresResources": false,
-    "language": "fr",
-    "types": [
-        "Movie",
-        "TvSeries",
-        "Anime"
-    ],
-    "authors": [
-        "Antigravity"
+    "pluginLists": [
+        "https://raw.githubusercontent.com/wasabidejavu/TestPlugins/builds/plugins.json"
     ]
 }
