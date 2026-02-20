@@ -6,6 +6,7 @@ import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.nicehttp.RequestBodyTypes
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 
 class SenpaiStreamProvider : MainAPI() {
@@ -39,26 +40,44 @@ class SenpaiStreamProvider : MainAPI() {
         "$mainUrl/animes" to "Animés",
     )
 
+    // Normalize curly/smart apostrophes and special chars to plain ASCII for text comparison
+    private fun normalizeText(text: String): String {
+        return text
+            .replace("\u2019", "'")  // Right single quotation mark
+            .replace("\u2018", "'")  // Left single quotation mark
+            .replace("\u00e9", "é")  // Already fine, but be safe
+            .replace("\u2013", "-")  // En dash
+            .replace("\u2014", "-")  // Em dash
+    }
+
     override suspend fun getMainPage(
         page: Int,
         request: MainPageRequest
     ): HomePageResponse {
         val items = if (!request.data.startsWith("http")) {
             val document = app.get(mainUrl, headers = headers).document
-            val header = document.select("h3").find { it.text().contains(request.data, ignoreCase = true) }
-            
-            // Try to find the container: usually the next sibling, or inside the next sibling
-            // We look for the grid/swiper container following the header
-            var container = header?.nextElementSibling()
-            while (container != null && !container.classNames().any { it.contains("grid") || it.contains("swiper") }) {
-                 container = container.nextElementSibling()
+            val normalizedSearch = normalizeText(request.data)
+            val header = document.select("h3").find {
+                normalizeText(it.text()).contains(normalizedSearch, ignoreCase = true)
             }
             
-            // If direct sibling check failed, try a broader look (e.g. parent's sibling) if needed, 
-            // but for now let's assume standard structure or fallback to finding cards within the 'next' structure.
-            // Actually, if we can't find a specific container, let's just grab the next element that contains our card selector.
+            // Find the container: look for the grid/swiper container following the header
+            // For Top 10 sections: h3 is inside a div, and the swiper is a sibling div
+            // We need to go up to the parent and look for swiper/grid among siblings
+            var container = header?.parent()?.nextElementSibling()
+            if (container == null || !container.classNames().any { cn -> 
+                cn.contains("grid") || cn.contains("swiper") 
+            }) {
+                // Try traversing siblings more broadly
+                container = header?.nextElementSibling()
+                while (container != null && !container.classNames().any { cn -> 
+                    cn.contains("grid") || cn.contains("swiper") 
+                }) {
+                    container = container.nextElementSibling()
+                }
+            }
             
-            val safeContainer = container ?: header?.parent()?.nextElementSibling() ?: document
+            val safeContainer = container ?: header?.parent()?.parent() ?: document
             
             safeContainer.select("div.relative.group.overflow-hidden").mapNotNull {
                 it.toSearchResponse()
@@ -105,6 +124,31 @@ class SenpaiStreamProvider : MainAPI() {
         }
     }
 
+    // Parse episodes from a container element (document or parsed HTML fragment)
+    private fun parseEpisodesFromElement(container: Element, seasonIndex: Int): List<Episode> {
+        return container.select("div.relative.group").mapNotNull { group ->
+            val link = group.selectFirst("a")?.attr("href") ?: return@mapNotNull null
+            val epTitle = group.selectFirst("h3")?.text()?.trim() ?: "Episode"
+            val metaDiv = group.selectFirst("div.text-xs")
+            val metaText = metaDiv?.text() ?: ""
+
+            val seasonMatch = Regex("""Saison\s*(\d+)""").find(metaText)
+            val episodeMatch = Regex("""[EÉ]pisodes?\s*(\d+)""").find(metaText)
+
+            val seasonNum = seasonMatch?.groupValues?.get(1)?.toIntOrNull() ?: seasonIndex
+            val episodeNum = episodeMatch?.groupValues?.get(1)?.toIntOrNull()
+
+            newEpisode(fixUrl(link)) {
+                this.name = epTitle
+                this.season = seasonNum
+                this.episode = episodeNum
+                this.posterUrl = group.selectFirst("img")?.let { img ->
+                    img.attr("data-src").ifEmpty { img.attr("src") }
+                }
+            }
+        }
+    }
+
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url, headers = headers).document
 
@@ -123,25 +167,94 @@ class SenpaiStreamProvider : MainAPI() {
         val type = if (url.contains("/series/") || url.contains("/tv-show/") || url.contains("/anime/")) TvType.TvSeries else TvType.Movie
 
         if (type == TvType.TvSeries) {
-            val episodes = document.select("div.grid.grid-cols-2.lg\\:grid-cols-6.2xl\\:grid-cols-8.gap-6.mt-4 > div.relative.group").mapNotNull { group ->
-                val link = group.selectFirst("a")?.attr("href") ?: return@mapNotNull null
-                val epTitle = group.selectFirst("h3")?.text()?.trim() ?: "Episode"
-                val releaseDate = group.selectFirst("div.text-xs.text-white\\/50.space-x-2")?.text()
+            val allEpisodes = mutableListOf<Episode>()
 
-                val seasonMatch = Regex("""Saison\s*(\d+)""").find(releaseDate ?: "")
-                val episodeMatch = Regex("""Épisodes\s*(\d+)""").find(releaseDate ?: "")
-                
-                val seasonNum = seasonMatch?.groupValues?.get(1)?.toIntOrNull() ?: 1
-                val episodeNum = episodeMatch?.groupValues?.get(1)?.toIntOrNull()
+            // Parse season 1 episodes from the initial page
+            val episodeGrid = document.selectFirst("div.grid.grid-cols-2")
+            if (episodeGrid != null) {
+                allEpisodes.addAll(parseEpisodesFromElement(episodeGrid, 1))
+            }
 
-                newEpisode(fixUrl(link)) {
-                    this.name = epTitle
-                    this.season = seasonNum
-                    this.episode = episodeNum
-                    this.posterUrl = group.selectFirst("img")?.attr("src")
+            // Find the season-component wire:snapshot to get season data
+            val seasonComponent = document.select("div[wire\\:snapshot]").find { div ->
+                div.attr("wire:snapshot").contains("season-component")
+            }
+
+            if (seasonComponent != null) {
+                // Parse all season buttons from the dropdown
+                val seasonButtons = seasonComponent.select("button[wire\\:click*=updateSeason]")
+                val seasonIds = seasonButtons.mapNotNull { btn ->
+                    Regex("""updateSeason\(['"]?(\d+)['"]?\)""").find(btn.attr("wire:click"))?.groupValues?.get(1)
+                }
+
+                // Get the wire:snapshot for Livewire requests
+                // Jsoup auto-decodes HTML entities (&quot; -> "), so attr() gives us clean JSON
+                val snapshotRaw = seasonComponent.attr("wire:snapshot")
+                val csrfToken = document.selectFirst("meta[name='csrf-token']")?.attr("content") ?: ""
+
+                // For each additional season (skip the first one, already parsed)
+                if (seasonIds.size > 1) {
+                    for (i in 1 until seasonIds.size) {
+                        try {
+                            val seasonId = seasonIds[i]
+                            // Build Livewire v3 update payload using proper JSON serialization
+                            val payloadMap = mapOf(
+                                "_token" to csrfToken,
+                                "components" to listOf(
+                                    mapOf(
+                                        "snapshot" to snapshotRaw,
+                                        "updates" to emptyMap<String, Any>(),
+                                        "calls" to listOf(
+                                            mapOf(
+                                                "path" to "",
+                                                "method" to "updateSeason",
+                                                "params" to listOf(seasonId)
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                            val payload = payloadMap.toJson()
+
+                            val livewireHeaders = mapOf(
+                                "X-Livewire" to "true",
+                                "Content-Type" to "application/json",
+                                "X-CSRF-TOKEN" to csrfToken,
+                                "Origin" to mainUrl,
+                                "Referer" to url,
+                                "User-Agent" to headers["User-Agent"]!!,
+                                "Accept" to "application/json"
+                            )
+
+                            val response = app.post(
+                                "$mainUrl/livewire/update",
+                                headers = livewireHeaders,
+                                requestBody = payload.toRequestBody(RequestBodyTypes.JSON.toMediaTypeOrNull())
+                            )
+
+                            // Parse HTML from Livewire response
+                            // Livewire v3 returns: {"components":[{"effects":{"html":"..."}, ...}]}
+                            val responseText = response.text
+                            val htmlMatch = Regex(""""html"\s*:\s*"((?:[^"\\]|\\.)*)"""").find(responseText)
+                            if (htmlMatch != null) {
+                                val htmlContent = htmlMatch.groupValues[1]
+                                    .replace("\\n", "\n")
+                                    .replace("\\t", "\t")
+                                    .replace("\\\"", "\"")
+                                    .replace("\\\\", "\\")
+                                    .replace("\\/", "/")
+                                val seasonDoc = Jsoup.parse(htmlContent)
+                                allEpisodes.addAll(parseEpisodesFromElement(seasonDoc, i + 1))
+                            }
+                        } catch (e: Exception) {
+                            // If a season fails to load, continue with others
+                            continue
+                        }
+                    }
                 }
             }
-            return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+
+            return newTvSeriesLoadResponse(title, url, TvType.TvSeries, allEpisodes) {
                 this.posterUrl = poster
                 this.plot = description
                 this.year = year

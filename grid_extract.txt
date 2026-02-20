@@ -1,0 +1,21 @@
+﻿[if ENDBLOCK]><![endif]-->
+                </div>
+            </div>
+
+
+            <div class="grid grid-cols-2 lg:grid-cols-6 2xl:grid-cols-8 gap-6 mt-4">
+                <!--[if BLOCK]><![endif]-->                    <div class="relative group">
+    <a href="https://senpai-stream.hair/episode/percy-jackson-et-les-olympiens-2/1-1" aria-label="1" class="aspect-video block relative bg-gray-900 rounded-md transition overflow-hidden cursor-pointer before:absolute before:-inset-px before:bg-gradient-to-b before:from-gray-950 before:to-gray-950/[.4] before:-m-px before:z-[1] before:opacity-0 group-hover:before:opacity-100">
+        <img src="./exemple page serie_files/tBlYUJrATQJIilgO0P40edoQAgE.jpg" alt="1" class="absolute h-full w-full object-cover">
+
+        <div class="hidden group-hover:flex absolute left-1/2 top-1/2 -translate-x-1/2 z-20 -translate-y-1/2 h-12 w-12 items-center justify-center cursor-pointer rounded-full bg-white/50 text-white transition">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="hi-mini hi-play h-5 w-5 translate-x-0.5">
+                <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"></path>
+            </svg>
+        </div>
+        <!--[if ENDBLOCK]><![endif]-->
+    </a>
+    <div class="pt-4 transition">
+        <h3 class="text-sm tracking-tighter font-medium text-gray-300 line-clamp-1">Je pulvÃ©rise accidentellement ma prof de maths</h3>
+        <div class="text-xs text-white/50 space-x-2 mt-0.5 flex items-center">
+            <span>Saison
