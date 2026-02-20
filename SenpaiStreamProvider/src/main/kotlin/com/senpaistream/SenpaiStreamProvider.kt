@@ -14,11 +14,17 @@ class SenpaiStreamProvider : MainAPI() {
     override val hasMainPage = true
     override var lang = "fr"
     override val hasDownloadSupport = true
-    override val hasDownloadSupport = true
     override val supportedTypes = setOf(
         TvType.Movie,
         TvType.TvSeries,
         TvType.Anime,
+    )
+
+    private val headers = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Referer" to "https://senpai-stream.hair/",
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language" to "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7"
     )
 
     override val mainPage = mainPageOf(
@@ -38,7 +44,7 @@ class SenpaiStreamProvider : MainAPI() {
         request: MainPageRequest
     ): HomePageResponse {
         val items = if (!request.data.startsWith("http")) {
-            val document = app.get(mainUrl).document
+            val document = app.get(mainUrl, headers = headers).document
             val header = document.select("h3").find { it.text().contains(request.data, ignoreCase = true) }
             
             // Try to find the container: usually the next sibling, or inside the next sibling
@@ -59,7 +65,7 @@ class SenpaiStreamProvider : MainAPI() {
             }
         } else {
             val url = if (page == 1) request.data else "${request.data}?page=$page"
-            val document = app.get(url).document
+            val document = app.get(url, headers = headers).document
             document.select("div.relative.group.overflow-hidden").mapNotNull {
                 it.toSearchResponse()
             }
@@ -92,7 +98,7 @@ class SenpaiStreamProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/search/${query.replace(" ", "%20")}"
-        val document = app.get(url).document
+        val document = app.get(url, headers = headers).document
 
         return document.select("div.relative.group.overflow-hidden").mapNotNull {
             it.toSearchResponse()
@@ -100,7 +106,7 @@ class SenpaiStreamProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val document = app.get(url).document
+        val document = app.get(url, headers = headers).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: return null
         val poster = document.selectFirst("img[alt='Cover']")?.let { img ->
@@ -155,7 +161,7 @@ class SenpaiStreamProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
-        val document = app.get(data).document
+        val document = app.get(data, headers = headers).document
 
         // Extract wire:snapshot from the video component
         // Usually in a div with wire:snapshot="{...}" and wire:id="..." 
@@ -220,17 +226,18 @@ class SenpaiStreamProvider : MainAPI() {
                     )
                 )
 
-                val headers = mapOf(
+                val livewireHeaders = mapOf(
                     "X-Livewire" to "true",
                     "Content-Type" to "application/json",
                     "X-CSRF-TOKEN" to (document.selectFirst("meta[name='csrf-token']")?.attr("content") ?: ""),
                     "Origin" to mainUrl,
-                    "Referer" to data
+                    "Referer" to data,
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
                 )
 
                 val response = app.post(
                     "$mainUrl/livewire/message/$componentName",
-                    headers = headers,
+                    headers = livewireHeaders,
                     requestBody = payload.toJson().toRequestBody(RequestBodyTypes.JSON.toMediaTypeOrNull())
                 )
 
