@@ -154,7 +154,7 @@ class SenpaiStreamProvider : MainAPI() {
                 this.tags = tags
                 this.plot = plot
                 this.year = year
-                addActorNames(actors)
+                LoadResponse.addActorNames(this, actors)
                 this.duration = duration
             }
         } else {
@@ -199,7 +199,7 @@ class SenpaiStreamProvider : MainAPI() {
                 this.tags = tags
                 this.plot = plot
                 this.year = year
-                addActorNames(actors)
+                LoadResponse.addActorNames(this, actors)
             }
         }
     }
