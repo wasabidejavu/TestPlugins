@@ -23,7 +23,12 @@ class SenpaiStreamProvider : MainAPI() {
     private val interceptor = CloudflareKiller()
 
     override val mainPage = mainPageOf(
-        "/movies?sort=release_date&page=" to "Nouveautés Films",
+        "/browse?type=movie&sort=created_at&page=" to "Nouveaux films",
+        "/browse?type=tv&sort=created_at&page=" to "Nouvelles séries",
+        "homepage:Top 10 des films aujourd'hui" to "Top 10 films",
+        "homepage:Top 10 des séries aujourd'hui" to "Top 10 séries",
+        "homepage:Top 10 des animés aujourd'hui" to "Top 10 animés",
+        "/trending?page=" to "Tendances",
     )
 
     data class VideoData(
@@ -41,12 +46,53 @@ class SenpaiStreamProvider : MainAPI() {
         page: Int,
         request: MainPageRequest
     ): HomePageResponse {
-        val url = "$mainUrl${request.data}$page"
-        val document = app.get(url, interceptor = interceptor).document
-        val items = document.select("div.relative.group.overflow-hidden").mapNotNull {
-            it.toSearchResponse()
+        if (request.data.startsWith("homepage:")) {
+            // Top 10 sections: only return results for page 1
+            if (page > 1) return newHomePageResponse(request.name, emptyList())
+            val sectionTitle = request.data.removePrefix("homepage:")
+            val document = app.get(mainUrl, interceptor = interceptor).document
+            val items = parseTop10Section(document, sectionTitle)
+            return newHomePageResponse(request.name, items)
+        } else {
+            // URL-based pages (browse, trending)
+            val url = "$mainUrl${request.data}$page"
+            val document = app.get(url, interceptor = interceptor).document
+            val items = document.select("div.relative.group.overflow-hidden").mapNotNull {
+                it.toSearchResponse()
+            }
+            return newHomePageResponse(request.name, items)
         }
-        return newHomePageResponse(request.name, items)
+    }
+
+    private fun parseTop10Section(document: Document, sectionTitle: String): List<SearchResponse> {
+        // Find the h3 that contains the section title text
+        val sectionHeader = document.select("h3").firstOrNull { it.text().contains(sectionTitle, ignoreCase = true) }
+            ?: return emptyList()
+
+        // The Top 10 container is the parent or a sibling container of the h3
+        // Navigate up to the section wrapper and find all item links
+        val sectionContainer = sectionHeader.parent() ?: return emptyList()
+        val itemLinks = sectionContainer.select("a[href]").filter { a ->
+            val href = a.attr("href")
+            href.contains("/movie/") || href.contains("/tv-show/") || href.contains("/anime/")
+        }
+
+        return itemLinks.mapNotNull { a ->
+            val href = a.attr("href")
+            val img = a.selectFirst("img")
+            val title = img?.attr("alt")
+                ?: a.selectFirst("h3")?.text()
+                ?: href.substringAfterLast("/").replace("-", " ")
+            val posterUrl = img?.let { it.attr("data-src").ifEmpty { it.attr("src") } }
+
+            val vData = generateVideoData(href)
+            vData.name = title
+
+            newMovieSearchResponse(title, vData.toJson(), vData.tvType) {
+                this.posterUrl = posterUrl
+                this.posterHeaders = mapOf("Referer" to mainUrl)
+            }
+        }
     }
 
     private fun Element.toSearchResponse(): SearchResponse? {
