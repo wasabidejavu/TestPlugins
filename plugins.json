@@ -1,0 +1,23 @@
+[
+    {
+        "iconUrl": "https://senpai-stream.hair/favicon/favicon-32x32.png",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/wasabidejavu/TestPlugins",
+        "fileSize": 21255,
+        "status": 3,
+        "language": "fr",
+        "authors": [
+            "Antigravity"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime"
+        ],
+        "version": 1,
+        "internalName": "SenpaiStreamProvider",
+        "description": "Cloudstream extension for SenpaiStream - Films, S\u00e9ries et Anim\u00e9s en fran\u00e7ais",
+        "url": "https://raw.githubusercontent.com/wasabidejavu/TestPlugins/builds/SenpaiStreamProvider.cs3",
+        "name": "SenpaiStreamProvider"
+    }
+]

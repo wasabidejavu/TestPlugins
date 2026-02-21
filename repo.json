@@ -1,0 +1,8 @@
+{
+    "name": "SenpaiStream Scraper",
+    "description": "Cloudstream extension for Senpai-Stream.hair",
+    "manifestVersion": 1,
+    "pluginLists": [
+        "https://raw.githubusercontent.com/wasabidejavu/TestPlugins/builds/plugins.json"
+    ]
+}
