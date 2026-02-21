@@ -199,12 +199,11 @@ class SenpaiStreamProvider : MainAPI() {
             val duration = durationMatch?.value?.toIntOrNull()
             val year = infos_.select("span:eq(2)").text().toIntOrNull()
 
-            // Extract player link from wire:snapshot
-            val playerUrl = Regex(""""link":"([^"]+)""").find(firstContainer)
-                ?.groupValues?.get(1)
-                ?.replace("\\", "") ?: ""
+            // Extract embed URL from the video iframe src
+            val embedUrl = document.selectFirst("iframe#video-iframe")?.attr("src")
+                ?.let { if (it.startsWith("http")) it else "$mainUrl$it" } ?: ""
 
-            val lData = LinkData(playerUrl)
+            val lData = LinkData(embedUrl)
 
             return newMovieLoadResponse(name, episodePageUrl, tvType, lData.toJson()) {
                 this.posterUrl = cover
@@ -269,25 +268,21 @@ class SenpaiStreamProvider : MainAPI() {
         episodes: ArrayList<Episode>
     ) {
         val episodeLinks = document.select("div.mx-3 > a")
-        episodeLinks.forEachIndexed { eIndex, e ->
-            // For the first episode (eIndex == 0), extract playerUrl from wire:snapshot
-            val playerUrl = if (eIndex == 0) {
-                Regex(""""link":"([^"]+)""").find(wireSnapshot)
-                    ?.groupValues?.get(1)
-                    ?.replace("\\", "") ?: ""
-            } else {
-                ""
-            }
 
+        // Extract embed URL from iframe for the first episode
+        val firstEpisodeEmbedUrl = document.selectFirst("iframe#video-iframe")?.attr("src")
+            ?.let { if (it.startsWith("http")) it else "$mainUrl$it" } ?: ""
+
+        episodeLinks.forEachIndexed { eIndex, e ->
             val epName = e.select("div:eq(0)").text()
             val epNumber = Regex("""\d+""").find(epName)?.value?.toIntOrNull()
             val epTitle = e.select("div:eq(1)").text()
 
-            // For first episode use player URL; for others use the href link
+            // For first episode use embed URL from iframe; for others use the href link
             val lData = if (eIndex > 0) {
                 LinkData(e.attr("href"), isDirect = false)
             } else {
-                LinkData(playerUrl)
+                LinkData(firstEpisodeEmbedUrl)
             }
 
             episodes.add(newEpisode(lData.toJson()) {
@@ -309,24 +304,44 @@ class SenpaiStreamProvider : MainAPI() {
         val url = linkData?.url ?: data
         if (url.isBlank()) return false
 
-        // If it's a direct link (from wire:snapshot), the url is the player URL
-        // If it's not direct, it's an episode page URL that we need to fetch
-        val playerUrl = if (linkData?.isDirect == false) {
-            // Fetch the episode page and extract the player link from wire:snapshot
+        // Get the embed URL
+        val embedUrl = if (linkData?.isDirect == false) {
+            // Non-direct: it's an episode page URL, fetch it and extract the iframe src
             val doc = app.get(url, interceptor = interceptor).document
-            val snapshot = doc.selectFirst("div.container > div")
-                ?.attr("wire:snapshot") ?: ""
-            Regex(""""link":"([^"]+)""").find(snapshot)
-                ?.groupValues?.get(1)
-                ?.replace("\\", "") ?: url
+            doc.selectFirst("iframe#video-iframe")?.attr("src")
+                ?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
+                ?: return false
         } else {
+            // Direct: URL is already the embed URL
             url
         }
 
-        if (playerUrl.isBlank()) return false
+        if (embedUrl.isBlank()) return false
 
-        // Try to extract video using loadExtractor (handles known embed sites)
-        loadExtractor(playerUrl, mainUrl, subtitleCallback, callback)
+        // Fetch the embed page and extract the actual video URL
+        val embedDoc = app.get(embedUrl, referer = mainUrl, interceptor = interceptor).document
+
+        // Try multiple selectors: media-player src, video src, source src
+        val videoUrl = embedDoc.selectFirst("media-player")?.attr("src")
+            ?: embedDoc.selectFirst("video")?.attr("src")
+            ?: embedDoc.selectFirst("source")?.attr("src")
+            ?: ""
+
+        if (videoUrl.isBlank()) return false
+
+        // Determine if it's M3U8 (HLS) or direct video
+        val isM3u8 = videoUrl.contains(".m3u8")
+
+        callback.invoke(
+            ExtractorLink(
+                source = this.name,
+                name = this.name,
+                url = videoUrl,
+                referer = mainUrl,
+                quality = Qualities.Unknown.value,
+                isM3u8 = isM3u8,
+            )
+        )
 
         return true
     }
