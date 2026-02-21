@@ -329,18 +329,19 @@ class SenpaiStreamProvider : MainAPI() {
 
         if (videoUrl.isBlank()) return false
 
-        // Determine if it's M3U8 (HLS) or direct video
-        val isM3u8 = videoUrl.contains(".m3u8")
+        // Determine link type
+        val linkType = if (videoUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
 
         callback.invoke(
-            ExtractorLink(
+            newExtractorLink(
                 source = this.name,
                 name = this.name,
                 url = videoUrl,
-                referer = mainUrl,
-                quality = Qualities.Unknown.value,
-                isM3u8 = isM3u8,
-            )
+                type = linkType
+            ) {
+                this.referer = mainUrl
+                this.quality = Qualities.Unknown.value
+            }
         )
 
         return true
