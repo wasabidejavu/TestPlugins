@@ -65,25 +65,37 @@ class SenpaiStreamProvider : MainAPI() {
     }
 
     private fun parseTop10Section(document: Document, sectionTitle: String): List<SearchResponse> {
+        // Normalize quotes for matching: the HTML uses Unicode right single quote '
+        val normalizedTitle = sectionTitle.replace("\u2019", "'").replace("'", "'").lowercase()
+
         // Find the h3 that contains the section title text
-        val sectionHeader = document.select("h3").firstOrNull { it.text().contains(sectionTitle, ignoreCase = true) }
-            ?: return emptyList()
+        val sectionHeader = document.select("h3").firstOrNull { h3 ->
+            val normalizedH3 = h3.text().replace("\u2019", "'").replace("'", "'").lowercase()
+            normalizedH3.contains(normalizedTitle)
+        } ?: return emptyList()
 
-        // The Top 10 container is the parent or a sibling container of the h3
-        // Navigate up to the section wrapper and find all item links
-        val sectionContainer = sectionHeader.parent() ?: return emptyList()
-        val itemLinks = sectionContainer.select("a[href]").filter { a ->
-            val href = a.attr("href")
-            href.contains("/movie/") || href.contains("/tv-show/") || href.contains("/anime/")
-        }
+        // The h3 is inside div.flex, which is inside div.pb-6 (the section container).
+        // We need the grandparent to access the sibling swiper div that contains items.
+        val sectionContainer = sectionHeader.parent()?.parent() ?: return emptyList()
 
-        return itemLinks.mapNotNull { a ->
-            val href = a.attr("href")
-            val img = a.selectFirst("img")
+        // Items are in swiper-slide divs with <a> elements linking to content
+        val slides = sectionContainer.select("div.swiper-slide")
+
+        return slides.mapNotNull { slide ->
+            // Each slide has <a href="/movie/slug"> or <a href="/tv-show/slug"> etc.
+            val link = slide.select("a[href]").firstOrNull { a ->
+                val href = a.attr("href")
+                href.contains("/movie/") || href.contains("/tv-show/") || href.contains("/anime/")
+            } ?: return@mapNotNull null
+
+            val href = link.attr("href")
+            val img = slide.selectFirst("img[data-src], img[src]")
             val title = img?.attr("alt")
-                ?: a.selectFirst("h3")?.text()
                 ?: href.substringAfterLast("/").replace("-", " ")
-            val posterUrl = img?.let { it.attr("data-src").ifEmpty { it.attr("src") } }
+            val posterUrl = img?.let {
+                val dataSrc = it.attr("data-src")
+                if (dataSrc.isNotEmpty()) dataSrc else it.attr("src")
+            }
 
             val vData = generateVideoData(href)
             vData.name = title
@@ -92,7 +104,7 @@ class SenpaiStreamProvider : MainAPI() {
                 this.posterUrl = posterUrl
                 this.posterHeaders = mapOf("Referer" to mainUrl)
             }
-        }
+        }.distinctBy { it.url } // Remove duplicates (each slide has 2 <a> with same href)
     }
 
     private fun Element.toSearchResponse(): SearchResponse? {
